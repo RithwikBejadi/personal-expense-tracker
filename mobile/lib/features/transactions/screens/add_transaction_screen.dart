@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:currency_text_input_formatter/currency_text_input_formatter.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/constants/api_constants.dart';
@@ -34,6 +35,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
   final _amountCtrl  = TextEditingController();
   final _descCtrl    = TextEditingController();
   final _noteCtrl    = TextEditingController();
+  final _currencyFormatter = CurrencyTextInputFormatter.currency(symbol: '', decimalDigits: 2);
 
   String   _type       = 'EXPENSE';
   String?  _categoryId;
@@ -71,6 +73,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
   }
 
   Future<void> _pickDate() async {
+    HapticFeedback.lightImpact();
     final picked = await showDatePicker(
       context:      context,
       initialDate:  _date,
@@ -97,6 +100,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
         padding: const EdgeInsets.all(24),
         child: Form(
           key: _formKey,
+          autovalidateMode: AutovalidateMode.onUserInteraction,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -122,7 +126,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                 hint: '0.00',
                 controller: _amountCtrl,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))],
+                inputFormatters: [_currencyFormatter],
                 prefixIcon: const Padding(padding: EdgeInsets.only(left: 14, right: 8), child: Text('\$', style: TextStyle(fontSize: 16, color: AppColors.textSecondary))),
                 validator: (v) {
                   if (v == null || v.isEmpty) return 'Amount is required';

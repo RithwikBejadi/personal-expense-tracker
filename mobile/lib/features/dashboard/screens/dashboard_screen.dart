@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/month_picker.dart';
 import '../../../shared/widgets/stat_card.dart';
+import '../../../shared/widgets/empty_state.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../transactions/providers/transaction_provider.dart';
 import '../../transactions/models/transaction_model.dart';
@@ -156,10 +157,28 @@ class DashboardScreen extends ConsumerWidget {
 
             // Recent transactions
             txns.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
+              loading: () => ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: 3,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (_, __) => Container(
+                  height: 60,
+                  decoration: BoxDecoration(
+                    color: AppColors.neutral100,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
               error: (e, _) => _ErrorCard(message: e.toString()),
               data: (list) {
-                if (list.isEmpty) return const SizedBox.shrink();
+                if (list.isEmpty) {
+                  return EmptyState(
+                    title: 'No expenses this month!',
+                    message: 'Tap the + button to add your first transaction.',
+                    icon: Icons.account_balance_wallet_outlined,
+                  );
+                }
                 final recent = list.take(5).toList();
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

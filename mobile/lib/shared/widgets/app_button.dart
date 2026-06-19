@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../core/theme/app_theme.dart';
 
 enum AppButtonVariant { primary, secondary, ghost, destructive }
@@ -21,6 +22,13 @@ class AppButton extends StatelessWidget {
     this.width,
   });
 
+  void _handlePress() {
+    if (onPressed != null) {
+      HapticFeedback.lightImpact();
+      onPressed!();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final child = isLoading
@@ -37,11 +45,11 @@ class AppButton extends StatelessWidget {
             : Text(label);
 
     final button = switch (variant) {
-      AppButtonVariant.primary     => ElevatedButton(onPressed: isLoading ? null : onPressed, child: child),
-      AppButtonVariant.secondary   => OutlinedButton(onPressed: isLoading ? null : onPressed, child: child),
-      AppButtonVariant.ghost       => TextButton(onPressed: isLoading ? null : onPressed, child: child),
+      AppButtonVariant.primary     => ElevatedButton(onPressed: isLoading ? null : _handlePress, child: child),
+      AppButtonVariant.secondary   => OutlinedButton(onPressed: isLoading ? null : _handlePress, child: child),
+      AppButtonVariant.ghost       => TextButton(onPressed: isLoading ? null : _handlePress, child: child),
       AppButtonVariant.destructive => ElevatedButton(
-          onPressed: isLoading ? null : onPressed,
+          onPressed: isLoading ? null : _handlePress,
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColors.expense,
             foregroundColor: Colors.white,

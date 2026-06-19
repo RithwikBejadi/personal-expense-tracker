@@ -45,7 +45,19 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
 
       // Full-screen routes (no bottom nav)
-      GoRoute(path: '/add-transaction', builder: (_, __) => const AddTransactionScreen()),
+      GoRoute(
+        path: '/add-transaction', 
+        pageBuilder: (context, state) => CustomTransitionPage(
+          key: state.pageKey,
+          child: const AddTransactionScreen(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return SlideTransition(
+              position: animation.drive(Tween(begin: const Offset(0, 1), end: Offset.zero).chain(CurveTween(curve: Curves.easeOutCubic))),
+              child: child,
+            );
+          },
+        ),
+      ),
       GoRoute(
         path: '/budget-planner/:month/:year',
         builder: (_, state) => BudgetPlannerScreen(
@@ -53,7 +65,19 @@ final routerProvider = Provider<GoRouter>((ref) {
           year:  int.parse(state.pathParameters['year']!),
         ),
       ),
-      GoRoute(path: '/add-goal',         builder: (_, __) => const AddGoalScreen()),
+      GoRoute(
+        path: '/add-goal',         
+        pageBuilder: (context, state) => CustomTransitionPage(
+          key: state.pageKey,
+          child: const AddGoalScreen(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return SlideTransition(
+              position: animation.drive(Tween(begin: const Offset(0, 1), end: Offset.zero).chain(CurveTween(curve: Curves.easeOutCubic))),
+              child: child,
+            );
+          },
+        ),
+      ),
       GoRoute(
         path: '/goal/:id',
         builder: (_, state) => GoalDetailScreen(goalId: state.pathParameters['id']!),
