@@ -1,139 +1,224 @@
-const sql = require('../config/db');
+const prisma = require('../config/db');
 
-// GET /budgets?month=6&year=2026
+// GET /api/budgets  — list all months
 const getAll = async (req, res, next) => {
   try {
-    const budgets = await sql`
-      SELECT * FROM budgets WHERE user_id = ${req.userId} ORDER BY year DESC, month DESC
-    `;
-    res.json({ budgets });
+    const { page = 1, limit = 12 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    const where = { userId: req.userId };
+
+    const [budgets, total] = await prisma.$transaction([
+      prisma.budget.findMany({
+        where,
+        include: { _count: { select: { items: true } } },
+        orderBy: [{ year: 'desc' }, { month: 'desc' }],
+        skip,
+        take: parseInt(limit),
+      }),
+      prisma.budget.count({ where }),
+    ]);
+
+    res.json({
+      budgets,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / parseInt(limit)),
+      },
+    });
   } catch (err) { next(err); }
 };
 
-// GET /budgets/:month/:year  — full plan with items + spending summary
+// GET /api/budgets/:month/:year  — full plan with spending vs planned
 const getOne = async (req, res, next) => {
   try {
-    const { month, year } = req.params;
+    const month = parseInt(req.params.month);
+    const year  = parseInt(req.params.year);
 
-    const [budget] = await sql`
-      SELECT * FROM budgets WHERE user_id = ${req.userId} AND month = ${month} AND year = ${year}
-    `;
+    const budget = await prisma.budget.findUnique({
+      where: { userId_month_year: { userId: req.userId, month, year } },
+      include: {
+        items: {
+          include: { category: true },
+          orderBy: { plannedAmount: 'desc' },
+        },
+      },
+    });
     if (!budget) return res.status(404).json({ error: 'Budget not found' });
 
-    const items = await sql`
-      SELECT
-        bi.*,
-        c.name  AS category_name,
-        c.color AS category_color,
-        c.icon  AS category_icon,
-        c.type  AS category_type,
-        COALESCE(SUM(t.amount), 0) AS spent
-      FROM budget_items bi
-      JOIN categories c ON c.id = bi.category_id
-      LEFT JOIN transactions t
-        ON t.category_id = bi.category_id
-        AND t.user_id    = ${req.userId}
-        AND EXTRACT(MONTH FROM t.date) = ${month}
-        AND EXTRACT(YEAR  FROM t.date) = ${year}
-      WHERE bi.budget_id = ${budget.id}
-      GROUP BY bi.id, c.name, c.color, c.icon, c.type
-    `;
+    // Actual spending per category this month
+    const start = new Date(year, month - 1, 1);
+    const end   = new Date(year, month, 0);
 
-    // Overall spending for the month
-    const [summary] = await sql`
-      SELECT
-        COALESCE(SUM(CASE WHEN type = 'expense' THEN amount END), 0) AS total_spent,
-        COALESCE(SUM(CASE WHEN type = 'income'  THEN amount END), 0) AS total_income
-      FROM transactions
-      WHERE user_id = ${req.userId}
-        AND EXTRACT(MONTH FROM date) = ${month}
-        AND EXTRACT(YEAR  FROM date) = ${year}
-    `;
+    const actuals = await prisma.transaction.groupBy({
+      by: ['categoryId', 'type'],
+      where: {
+        userId: req.userId,
+        date: { gte: start, lte: end },
+        categoryId: { not: null },
+      },
+      _sum: { amount: true },
+    });
 
-    res.json({ budget, items, summary });
+    const actualMap = {};
+    for (const a of actuals) {
+      if (!actualMap[a.categoryId]) actualMap[a.categoryId] = { INCOME: 0, EXPENSE: 0 };
+      actualMap[a.categoryId][a.type] = Number(a._sum.amount);
+    }
+
+    const itemsWithActuals = budget.items.map((item) => ({
+      ...item,
+      spent:     actualMap[item.categoryId]?.[item.category.type] ?? 0,
+      remaining: Number(item.plannedAmount) - (actualMap[item.categoryId]?.[item.category.type] ?? 0),
+    }));
+
+    // Month totals
+    const totals = await prisma.transaction.groupBy({
+      by: ['type'],
+      where: { userId: req.userId, date: { gte: start, lte: end } },
+      _sum: { amount: true },
+    });
+
+    const totalIncome   = Number(totals.find((t) => t.type === 'INCOME')?._sum?.amount  ?? 0);
+    const totalExpenses = Number(totals.find((t) => t.type === 'EXPENSE')?._sum?.amount ?? 0);
+
+    res.json({
+      budget: { ...budget, items: itemsWithActuals },
+      summary: {
+        totalPlanned:   Number(budget.totalPlanned),
+        totalIncome,
+        totalExpenses,
+        net:            totalIncome - totalExpenses,
+        remainingBudget: Number(budget.totalPlanned) - totalExpenses,
+      },
+    });
   } catch (err) { next(err); }
 };
 
-// POST /budgets
+// POST /api/budgets
 const create = async (req, res, next) => {
   try {
-    const { month, year, total_planned, notes, items = [] } = req.body;
+    const { month, year, totalPlanned, notes, items = [] } = req.body;
 
-    const [budget] = await sql`
-      INSERT INTO budgets (user_id, month, year, total_planned, notes)
-      VALUES (${req.userId}, ${month}, ${year}, ${total_planned || 0}, ${notes || null})
-      RETURNING *
-    `;
-
-    if (items.length > 0) {
-      const values = items.map((i) => ({
-        budget_id: budget.id,
-        category_id: i.category_id,
-        planned_amount: i.planned_amount,
-      }));
-      await sql`INSERT INTO budget_items ${sql(values)}`;
-    }
+    const budget = await prisma.budget.create({
+      data: {
+        userId: req.userId,
+        month,
+        year,
+        totalPlanned: totalPlanned || 0,
+        notes: notes || null,
+        items: {
+          create: items.map((i) => ({
+            categoryId:    i.categoryId,
+            plannedAmount: i.plannedAmount,
+          })),
+        },
+      },
+      include: { items: { include: { category: true } } },
+    });
 
     res.status(201).json({ budget });
   } catch (err) {
-    if (err.message?.includes('unique')) {
-      return res.status(409).json({ error: 'Budget for this month/year already exists' });
-    }
+    if (err.code === 'P2002') return res.status(409).json({ error: 'Budget for this month/year already exists' });
     next(err);
   }
 };
 
-// PATCH /budgets/:id
+// PATCH /api/budgets/:id
 const update = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { total_planned, notes } = req.body;
+    const { totalPlanned, notes } = req.body;
 
-    const [budget] = await sql`
-      UPDATE budgets
-      SET
-        total_planned = COALESCE(${total_planned ?? null}, total_planned),
-        notes         = COALESCE(${notes         ?? null}, notes)
-      WHERE id = ${id} AND user_id = ${req.userId}
-      RETURNING *
-    `;
-    if (!budget) return res.status(404).json({ error: 'Budget not found' });
+    const existing = await prisma.budget.findFirst({ where: { id, userId: req.userId } });
+    if (!existing) return res.status(404).json({ error: 'Budget not found' });
+
+    const budget = await prisma.budget.update({
+      where: { id },
+      data: {
+        ...(totalPlanned !== undefined && { totalPlanned }),
+        ...(notes        !== undefined && { notes }),
+      },
+    });
     res.json({ budget });
   } catch (err) { next(err); }
 };
 
-// DELETE /budgets/:id
+// DELETE /api/budgets/:id
 const remove = async (req, res, next) => {
   try {
     const { id } = req.params;
-    await sql`DELETE FROM budgets WHERE id = ${id} AND user_id = ${req.userId}`;
+    const existing = await prisma.budget.findFirst({ where: { id, userId: req.userId } });
+    if (!existing) return res.status(404).json({ error: 'Budget not found' });
+
+    await prisma.budget.delete({ where: { id } });
     res.status(204).send();
   } catch (err) { next(err); }
 };
 
-// PUT /budgets/:id/items — replace all items for a budget
+// PUT /api/budgets/:id/items  — replace all line items
 const upsertItems = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { items = [] } = req.body;
 
-    const [budget] = await sql`SELECT id FROM budgets WHERE id = ${id} AND user_id = ${req.userId}`;
-    if (!budget) return res.status(404).json({ error: 'Budget not found' });
+    const existing = await prisma.budget.findFirst({ where: { id, userId: req.userId } });
+    if (!existing) return res.status(404).json({ error: 'Budget not found' });
 
-    await sql`DELETE FROM budget_items WHERE budget_id = ${id}`;
+    // Transactional replace
+    const result = await prisma.$transaction([
+      prisma.budgetItem.deleteMany({ where: { budgetId: id } }),
+      prisma.budgetItem.createMany({
+        data: items.map((i) => ({
+          budgetId:      id,
+          categoryId:    i.categoryId,
+          plannedAmount: i.plannedAmount,
+        })),
+      }),
+    ]);
 
-    if (items.length > 0) {
-      const values = items.map((i) => ({
-        budget_id: id,
-        category_id: i.category_id,
-        planned_amount: i.planned_amount,
-      }));
-      await sql`INSERT INTO budget_items ${sql(values)}`;
-    }
+    const updatedItems = await prisma.budgetItem.findMany({
+      where: { budgetId: id },
+      include: { category: true },
+    });
 
-    const updatedItems = await sql`SELECT * FROM budget_items WHERE budget_id = ${id}`;
-    res.json({ items: updatedItems });
+    res.json({ items: updatedItems, replaced: result[1].count });
   } catch (err) { next(err); }
 };
 
-module.exports = { getAll, getOne, create, update, remove, upsertItems };
+// GET /api/budgets/compare?months=3  — last N months side by side
+const compare = async (req, res, next) => {
+  try {
+    const months = parseInt(req.query.months) || 3;
+    const results = [];
+
+    for (let i = 0; i < months; i++) {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      const month = d.getMonth() + 1;
+      const year  = d.getFullYear();
+
+      const start = new Date(year, month - 1, 1);
+      const end   = new Date(year, month, 0);
+
+      const totals = await prisma.transaction.groupBy({
+        by: ['type'],
+        where: { userId: req.userId, date: { gte: start, lte: end } },
+        _sum: { amount: true },
+      });
+
+      results.push({
+        month,
+        year,
+        income:   Number(totals.find((t) => t.type === 'INCOME')?._sum?.amount  ?? 0),
+        expenses: Number(totals.find((t) => t.type === 'EXPENSE')?._sum?.amount ?? 0),
+      });
+    }
+
+    res.json({ comparison: results.reverse() });
+  } catch (err) { next(err); }
+};
+
+module.exports = { getAll, getOne, create, update, remove, upsertItems, compare };

@@ -1,6 +1,15 @@
-const { neon } = require('@neondatabase/serverless');
-require('dotenv').config();
+const { PrismaClient } = require('@prisma/client');
 
-const sql = neon(process.env.DATABASE);
+const globalForPrisma = globalThis;
 
-module.exports = sql;
+const prisma =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    log: process.env.NODE_ENV === 'development' ? ['query', 'warn', 'error'] : ['error'],
+  });
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForPrisma.prisma = prisma;
+}
+
+module.exports = prisma;

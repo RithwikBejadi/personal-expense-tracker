@@ -1,136 +1,215 @@
-const sql = require('../config/db');
+const prisma = require('../config/db');
 
-// GET /transactions?month=6&year=2026&type=expense&category_id=...&page=1&limit=20
+// GET /api/transactions?month=6&year=2026&type=EXPENSE&categoryId=...&page=1&limit=20&search=...
 const getAll = async (req, res, next) => {
   try {
-    const { month, year, type, category_id, page = 1, limit = 20 } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const { month, year, type, categoryId, search, page = 1, limit = 20 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const transactions = await sql`
-      SELECT
-        t.*,
-        c.name  AS category_name,
-        c.color AS category_color,
-        c.icon  AS category_icon
-      FROM transactions t
-      LEFT JOIN categories c ON c.id = t.category_id
-      WHERE t.user_id = ${req.userId}
-        AND (${month ? sql`EXTRACT(MONTH FROM t.date) = ${month}` : sql`TRUE`})
-        AND (${year  ? sql`EXTRACT(YEAR  FROM t.date) = ${year}`  : sql`TRUE`})
-        AND (${type  ? sql`t.type = ${type}`                       : sql`TRUE`})
-        AND (${category_id ? sql`t.category_id = ${category_id}`  : sql`TRUE`})
-      ORDER BY t.date DESC, t.created_at DESC
-      LIMIT ${parseInt(limit)} OFFSET ${offset}
-    `;
+    const where = { userId: req.userId };
 
-    const [{ count }] = await sql`
-      SELECT COUNT(*) FROM transactions t
-      WHERE t.user_id = ${req.userId}
-        AND (${month ? sql`EXTRACT(MONTH FROM t.date) = ${month}` : sql`TRUE`})
-        AND (${year  ? sql`EXTRACT(YEAR  FROM t.date) = ${year}`  : sql`TRUE`})
-        AND (${type  ? sql`t.type = ${type}`                       : sql`TRUE`})
-        AND (${category_id ? sql`t.category_id = ${category_id}`  : sql`TRUE`})
-    `;
+    if (month && year) {
+      where.date = {
+        gte: new Date(year, month - 1, 1),
+        lte: new Date(year, month, 0),
+      };
+    }
+    if (type)       where.type       = type.toUpperCase();
+    if (categoryId) where.categoryId = categoryId;
+    if (search)     where.description = { contains: search, mode: 'insensitive' };
+
+    const [transactions, total] = await prisma.$transaction([
+      prisma.transaction.findMany({
+        where,
+        include: { category: { select: { name: true, color: true, icon: true, type: true } } },
+        orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+        skip,
+        take: parseInt(limit),
+      }),
+      prisma.transaction.count({ where }),
+    ]);
 
     res.json({
       transactions,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total: parseInt(count) },
+      pagination: {
+        page:       parseInt(page),
+        limit:      parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / parseInt(limit)),
+      },
     });
   } catch (err) { next(err); }
 };
 
-// GET /transactions/summary?month=6&year=2026
+// GET /api/transactions/summary?month=6&year=2026
 const getSummary = async (req, res, next) => {
   try {
     const { month, year } = req.query;
 
-    const byCategory = await sql`
-      SELECT
-        c.id,
-        c.name,
-        c.color,
-        c.icon,
-        c.type,
-        COALESCE(SUM(t.amount), 0) AS total
-      FROM categories c
-      LEFT JOIN transactions t
-        ON t.category_id = c.id
-        AND t.user_id    = ${req.userId}
-        AND (${month ? sql`EXTRACT(MONTH FROM t.date) = ${month}` : sql`TRUE`})
-        AND (${year  ? sql`EXTRACT(YEAR  FROM t.date) = ${year}`  : sql`TRUE`})
-      WHERE c.user_id = ${req.userId}
-      GROUP BY c.id
-      ORDER BY total DESC
-    `;
+    const dateFilter = {};
+    if (month && year) {
+      dateFilter.gte = new Date(year, month - 1, 1);
+      dateFilter.lte = new Date(year, month, 0);
+    }
+    const where = {
+      userId: req.userId,
+      ...(Object.keys(dateFilter).length && { date: dateFilter }),
+    };
 
-    const [totals] = await sql`
-      SELECT
-        COALESCE(SUM(CASE WHEN type = 'income'  THEN amount END), 0) AS total_income,
-        COALESCE(SUM(CASE WHEN type = 'expense' THEN amount END), 0) AS total_expenses
-      FROM transactions
-      WHERE user_id = ${req.userId}
-        AND (${month ? sql`EXTRACT(MONTH FROM date) = ${month}` : sql`TRUE`})
-        AND (${year  ? sql`EXTRACT(YEAR  FROM date) = ${year}`  : sql`TRUE`})
-    `;
+    // Totals by type
+    const byType = await prisma.transaction.groupBy({
+      by: ['type'],
+      where,
+      _sum: { amount: true },
+      _count: true,
+    });
+
+    // Totals by category
+    const byCategory = await prisma.transaction.groupBy({
+      by: ['categoryId', 'type'],
+      where: { ...where, categoryId: { not: null } },
+      _sum: { amount: true },
+      _count: true,
+      orderBy: { _sum: { amount: 'desc' } },
+    });
+
+    // Enrich with category info
+    const categoryIds = [...new Set(byCategory.map((b) => b.categoryId))];
+    const categories  = await prisma.category.findMany({
+      where: { id: { in: categoryIds } },
+      select: { id: true, name: true, color: true, icon: true },
+    });
+    const catMap = Object.fromEntries(categories.map((c) => [c.id, c]));
+
+    const income   = Number(byType.find((t) => t.type === 'INCOME')?._sum?.amount  ?? 0);
+    const expenses = Number(byType.find((t) => t.type === 'EXPENSE')?._sum?.amount ?? 0);
 
     res.json({
-      by_category: byCategory,
-      total_income: totals.total_income,
-      total_expenses: totals.total_expenses,
-      net: totals.total_income - totals.total_expenses,
+      income,
+      expenses,
+      net: income - expenses,
+      savingsRate: income > 0 ? (((income - expenses) / income) * 100).toFixed(1) : '0.0',
+      byCategory: byCategory.map((b) => ({
+        ...b,
+        total:    Number(b._sum.amount),
+        category: catMap[b.categoryId] || null,
+      })),
     });
   } catch (err) { next(err); }
 };
 
-// POST /transactions
+// GET /api/transactions/trends?months=6
+const getTrends = async (req, res, next) => {
+  try {
+    const months = parseInt(req.query.months) || 6;
+    const start  = new Date();
+    start.setMonth(start.getMonth() - (months - 1));
+    start.setDate(1);
+
+    const data = await prisma.$queryRaw`
+      SELECT
+        EXTRACT(YEAR  FROM date)::int AS year,
+        EXTRACT(MONTH FROM date)::int AS month,
+        type,
+        SUM(amount)::float            AS total
+      FROM transactions
+      WHERE user_id = ${req.userId}::uuid
+        AND date >= ${start}
+      GROUP BY year, month, type
+      ORDER BY year, month
+    `;
+
+    // Pivot into { year, month, income, expenses }
+    const pivotMap = {};
+    for (const row of data) {
+      const key = `${row.year}-${row.month}`;
+      if (!pivotMap[key]) pivotMap[key] = { year: row.year, month: row.month, income: 0, expenses: 0 };
+      if (row.type === 'INCOME')  pivotMap[key].income   = row.total;
+      if (row.type === 'EXPENSE') pivotMap[key].expenses = row.total;
+    }
+
+    res.json({ trends: Object.values(pivotMap) });
+  } catch (err) { next(err); }
+};
+
+// POST /api/transactions
 const create = async (req, res, next) => {
   try {
-    const { category_id, amount, type, description, date } = req.body;
-    const [transaction] = await sql`
-      INSERT INTO transactions (user_id, category_id, amount, type, description, date)
-      VALUES (
-        ${req.userId},
-        ${category_id || null},
-        ${amount},
-        ${type},
-        ${description || null},
-        ${date || sql`CURRENT_DATE`}
-      )
-      RETURNING *
-    `;
+    const { categoryId, amount, type, description, note, date } = req.body;
+
+    const transaction = await prisma.transaction.create({
+      data: {
+        userId:      req.userId,
+        categoryId:  categoryId  || null,
+        amount,
+        type:        type.toUpperCase(),
+        description: description || null,
+        note:        note        || null,
+        date:        date ? new Date(date) : new Date(),
+      },
+      include: { category: { select: { name: true, color: true, icon: true } } },
+    });
+
     res.status(201).json({ transaction });
   } catch (err) { next(err); }
 };
 
-// PATCH /transactions/:id
+// POST /api/transactions/bulk  — import multiple
+const createBulk = async (req, res, next) => {
+  try {
+    const { transactions } = req.body;
+
+    const data = transactions.map((t) => ({
+      userId:      req.userId,
+      categoryId:  t.categoryId  || null,
+      amount:      t.amount,
+      type:        t.type.toUpperCase(),
+      description: t.description || null,
+      note:        t.note        || null,
+      date:        t.date ? new Date(t.date) : new Date(),
+    }));
+
+    const result = await prisma.transaction.createMany({ data });
+    res.status(201).json({ created: result.count });
+  } catch (err) { next(err); }
+};
+
+// PATCH /api/transactions/:id
 const update = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { category_id, amount, type, description, date } = req.body;
+    const { categoryId, amount, type, description, note, date } = req.body;
 
-    const [transaction] = await sql`
-      UPDATE transactions
-      SET
-        category_id = COALESCE(${category_id  ?? null}, category_id),
-        amount      = COALESCE(${amount        ?? null}, amount),
-        type        = COALESCE(${type          ?? null}, type),
-        description = COALESCE(${description   ?? null}, description),
-        date        = COALESCE(${date          ?? null}, date)
-      WHERE id = ${id} AND user_id = ${req.userId}
-      RETURNING *
-    `;
-    if (!transaction) return res.status(404).json({ error: 'Transaction not found' });
+    const existing = await prisma.transaction.findFirst({ where: { id, userId: req.userId } });
+    if (!existing) return res.status(404).json({ error: 'Transaction not found' });
+
+    const transaction = await prisma.transaction.update({
+      where: { id },
+      data: {
+        ...(categoryId  !== undefined && { categoryId }),
+        ...(amount      !== undefined && { amount }),
+        ...(type        !== undefined && { type: type.toUpperCase() }),
+        ...(description !== undefined && { description }),
+        ...(note        !== undefined && { note }),
+        ...(date        !== undefined && { date: new Date(date) }),
+      },
+      include: { category: { select: { name: true, color: true, icon: true } } },
+    });
+
     res.json({ transaction });
   } catch (err) { next(err); }
 };
 
-// DELETE /transactions/:id
+// DELETE /api/transactions/:id
 const remove = async (req, res, next) => {
   try {
     const { id } = req.params;
-    await sql`DELETE FROM transactions WHERE id = ${id} AND user_id = ${req.userId}`;
+    const existing = await prisma.transaction.findFirst({ where: { id, userId: req.userId } });
+    if (!existing) return res.status(404).json({ error: 'Transaction not found' });
+
+    await prisma.transaction.delete({ where: { id } });
     res.status(204).send();
   } catch (err) { next(err); }
 };
 
-module.exports = { getAll, getSummary, create, update, remove };
+module.exports = { getAll, getSummary, getTrends, create, createBulk, update, remove };
