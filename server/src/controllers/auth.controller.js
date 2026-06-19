@@ -25,15 +25,15 @@ const register = async (req, res, next) => {
     // Seed default categories for new user
     await prisma.category.createMany({
       data: [
-        { userId: user.id, name: 'Salary',        type: 'INCOME',  color: '#10b981', icon: 'briefcase' },
-        { userId: user.id, name: 'Freelance',      type: 'INCOME',  color: '#06b6d4', icon: 'laptop'    },
-        { userId: user.id, name: 'Food & Drink',   type: 'EXPENSE', color: '#f59e0b', icon: 'utensils'  },
+        { userId: user.id, name: 'Stipend',        type: 'INCOME',  color: '#10b981', icon: 'briefcase' },
+        { userId: user.id, name: 'Clothes',        type: 'EXPENSE',  color: '#06b6d4', icon: 'laptop'    },
+        { userId: user.id, name: 'Fitness',        type: 'EXPENSE', color: '#f59e0b', icon: 'utensils'  },
         { userId: user.id, name: 'Transport',      type: 'EXPENSE', color: '#3b82f6', icon: 'car'       },
         { userId: user.id, name: 'Housing',        type: 'EXPENSE', color: '#8b5cf6', icon: 'home'      },
         { userId: user.id, name: 'Entertainment',  type: 'EXPENSE', color: '#ec4899', icon: 'tv'        },
         { userId: user.id, name: 'Health',         type: 'EXPENSE', color: '#ef4444', icon: 'heart'     },
         { userId: user.id, name: 'Shopping',       type: 'EXPENSE', color: '#f97316', icon: 'shopping-bag' },
-        { userId: user.id, name: 'Savings',        type: 'EXPENSE', color: '#14b8a6', icon: 'piggy-bank' },
+        { userId: user.id, name: 'Bills',        type: 'EXPENSE', color: '#14b8a6', icon: 'piggy-bank' },
         { userId: user.id, name: 'Other',          type: 'EXPENSE', color: '#6b7280', icon: 'tag'       },
       ],
     });
