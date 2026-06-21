@@ -1,9 +1,7 @@
 class ApiConstants {
   ApiConstants._();
 
-  // Android emulator → 10.0.2.2 maps to host localhost
-  // Real device → replace with your machine's local IP e.g. 192.168.x.x
-  static const String baseUrl = 'http://10.0.2.2:3000/api';
+  static const String baseUrl = 'https://rithwik-expense-planner-api.onrender.com/api';
 
   static const Duration connectTimeout = Duration(seconds: 10);
   static const Duration receiveTimeout = Duration(seconds: 20);
