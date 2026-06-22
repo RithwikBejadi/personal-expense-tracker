@@ -22,6 +22,7 @@ app.use(express.json({ limit: '1mb' }));
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'ok', env: process.env.NODE_ENV }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', env: process.env.NODE_ENV }));
 
 // ─── Public routes ────────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
