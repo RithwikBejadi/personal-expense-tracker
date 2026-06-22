@@ -102,7 +102,7 @@ export default function Dashboard() {
         year,
         items: items.filter((it) => it.categoryId && it.amount).map((it) => ({
           categoryId: it.categoryId,
-          amount: parseFloat(it.amount),
+          plannedAmount: parseFloat(it.amount),
         })),
       })
       setShowCreateModal(false)
@@ -125,11 +125,36 @@ export default function Dashboard() {
   const pExpenses = Number(summary?.plannedExpenses) || 0
   const pNet = Number(summary?.plannedNet) || (pIncome - pExpenses)
 
+  async function handleDeletePlan() {
+    if (!budgetData?.budget?.id) return
+    if (!window.confirm('Are you sure you want to delete this plan?')) return
+    
+    setLoading(true)
+    try {
+      await client.delete(`/budgets/${budgetData.budget.id}`)
+      setBudgetData(null)
+    } catch (err) {
+      setError('Failed to delete plan')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
         <h1 style={{ fontSize: '22px' }}>Budget Planner</h1>
-        <MonthPicker month={month} year={year} onChange={(m, y) => { setMonth(m); setYear(y) }} />
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          {budgetData && (
+            <button
+              onClick={handleDeletePlan}
+              style={{ padding: '6px 12px', fontSize: '13px', background: 'none', border: '1px solid var(--expense)', color: 'var(--expense)', borderRadius: '6px', cursor: 'pointer' }}
+            >
+              Delete Plan
+            </button>
+          )}
+          <MonthPicker month={month} year={year} onChange={(m, y) => { setMonth(m); setYear(y) }} />
+        </div>
       </div>
 
       {loading && <div style={{ color: 'var(--text-muted)', fontSize: '14px' }}>Loading planner...</div>}

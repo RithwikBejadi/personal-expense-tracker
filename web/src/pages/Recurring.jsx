@@ -75,7 +75,7 @@ export default function Recurring() {
         type: form.type,
         frequency: form.frequency,
         categoryId: form.categoryId || undefined,
-        nextDueDate: form.nextDueDate || undefined,
+        startDate: form.nextDueDate || undefined,
       })
       setShowModal(false)
       setForm({ description: '', amount: '', type: 'EXPENSE', frequency: 'MONTHLY', categoryId: '', nextDueDate: '' })
