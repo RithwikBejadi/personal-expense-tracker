@@ -4,7 +4,7 @@ import Login from './pages/Login.jsx'
 import Register from './pages/Register.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import Transactions from './pages/Transactions.jsx'
-import Budget from './pages/Budget.jsx'
+
 import Goals from './pages/Goals.jsx'
 import Recurring from './pages/Recurring.jsx'
 
@@ -29,14 +29,7 @@ function App() {
           </ProtectedRoute>
         }
       />
-      <Route
-        path="/budget"
-        element={
-          <ProtectedRoute>
-            <Budget />
-          </ProtectedRoute>
-        }
-      />
+
       <Route
         path="/goals"
         element={

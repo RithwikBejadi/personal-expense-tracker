@@ -2,9 +2,8 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 
 const NAV_ITEMS = [
-  { label: 'Dashboard', path: '/' },
-  { label: 'Transactions', path: '/transactions' },
-  { label: 'Budget', path: '/budget' },
+  { label: 'Planner', path: '/' },
+  { label: 'Tracker', path: '/transactions' },
   { label: 'Goals', path: '/goals' },
   { label: 'Recurring', path: '/recurring' },
 ]
@@ -40,7 +39,7 @@ export default function Layout({ children }) {
           borderBottom: '1px solid var(--border)',
         }}>
           <span style={{ fontWeight: 600, fontSize: '15px', color: 'var(--text-primary)' }}>
-            Expense Planner
+            Budget Planner
           </span>
         </div>
 

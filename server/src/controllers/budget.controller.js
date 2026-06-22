@@ -84,14 +84,26 @@ const getOne = async (req, res, next) => {
     const totalIncome   = Number(totals.find((t) => t.type === 'INCOME')?._sum?.amount  ?? 0);
     const totalExpenses = Number(totals.find((t) => t.type === 'EXPENSE')?._sum?.amount ?? 0);
 
+    // Calculate planned income and expenses from items
+    const plannedIncome = budget.items
+      .filter((i) => i.category.type === 'INCOME')
+      .reduce((sum, i) => sum + Number(i.plannedAmount), 0);
+    const plannedExpenses = budget.items
+      .filter((i) => i.category.type === 'EXPENSE')
+      .reduce((sum, i) => sum + Number(i.plannedAmount), 0);
+    const plannedNet = plannedIncome - plannedExpenses;
+
     res.json({
       budget: { ...budget, items: itemsWithActuals },
       summary: {
-        totalPlanned:   Number(budget.totalPlanned),
+        totalPlanned:   Number(budget.totalPlanned), // legacy
+        plannedIncome,
+        plannedExpenses,
+        plannedNet,
         totalIncome,
         totalExpenses,
         net:            totalIncome - totalExpenses,
-        remainingBudget: Number(budget.totalPlanned) - totalExpenses,
+        remainingBudget: plannedExpenses - totalExpenses, // or what's remaining to spend
       },
     });
   } catch (err) { next(err); }
